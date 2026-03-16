@@ -2,6 +2,21 @@ import logging
 import json
 import random
 import os
+from flask import Flask
+from threading import Thread
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Il bot è online!"
+
+def run():
+    app.run(host='0.0.0.0', port=10000)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
@@ -128,4 +143,5 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), gestore_testo))
 
     print("🚀 BOT ONLINE CON SUPPORTO HTML")
+    keep_alive()
     app.run_polling()
