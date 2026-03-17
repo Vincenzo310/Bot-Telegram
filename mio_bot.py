@@ -4,23 +4,25 @@ import random
 import os
 from flask import Flask
 from threading import Thread
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
-app = Flask('')
+# --- SERVER WEB PER RENDER ---
+# Usiamo un nome diverso da 'app' per non fare confusione con il bot
+webapp = Flask('')
 
-@app.route('/')
+@webapp.route('/')
 def home():
     return "Il bot è online!"
 
 def run():
-    app.run(host='0.0.0.0', port=10000)
+    webapp.run(host='0.0.0.0', port=10000)
 
 def keep_alive():
     t = Thread(target=run)
     t.start()
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
-# --- CONFIGURAZIONE ---
+# --- CONFIGURAZIONE BOT ---
 TOKEN = "8469087738:AAGjieDhhx_NU8eItWoGWMET8H35S7gLe6g"
 IL_TUO_ID_TELEGRAM = 1457338119
 DB_FILE = "db_squadre.json"
@@ -95,7 +97,6 @@ async def gestore_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             txt = "📊 <b>RIEPILOGO CANALI:</b>\n\n"
             for s, info in dati.items():
-                # Uso <b> per il grassetto sulle squadre
                 txt += f"• <b>{s}</b>: {info['usati']}\n"
         await query.edit_message_text(txt, reply_markup=bottone_indietro(), parse_mode='HTML')
 
@@ -126,7 +127,6 @@ async def gestore_testo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dati, ris = carica_dati(), "✔️ <b>CANALI ASSEGNATI:</b>\n\n"
     for s in squadre:
         c = ottieni_canale(s, dati)
-        # Qui mettiamo il grassetto con <b>
         ris += f"• <b>{s}</b>: Canale {c}\n"
     salva_dati(dati)
 
@@ -135,13 +135,17 @@ async def gestore_testo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                    reply_markup=menu_admin(),
                                    parse_mode='HTML')
 
+# --- AVVIO ---
 if __name__ == '__main__':
-    app = ApplicationBuilder().token(TOKEN).build()
+    # Facciamo partire il server web prima del bot
+    keep_alive()
 
-    app.add_handler(CommandHandler('start', start))
-    app.add_handler(CallbackQueryHandler(gestore_callback))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), gestore_testo))
+    # Avviamo il bot
+    bot_app = ApplicationBuilder().token(TOKEN).build()
+
+    bot_app.add_handler(CommandHandler('start', start))
+    bot_app.add_handler(CallbackQueryHandler(gestore_callback))
+    bot_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), gestore_testo))
 
     print("🚀 BOT ONLINE CON SUPPORTO HTML")
-    keep_alive()
-    app.run_polling()
+    bot_app.run_polling()
