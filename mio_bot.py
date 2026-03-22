@@ -118,8 +118,8 @@ async def gestore_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == 'help_assegna':
         txt = "(🎲 <b>MODALITÀ ASSEGNAZIONE ⤵️</b>\n\n"
-               "1️⃣ <b>CASUALE:</b>: <code>Juventus, Milan</code>\n"
-               "2️⃣ <b>MANUALE:</b>: <code>Inter:5</code>\n\n"
+               "1️⃣ <b>CASUALE:</b> <code>Juventus, Milan</code>\n"
+               "2️⃣ <b>MANUALE:</b> <code>Inter:5</code>\n\n"
                "⚠️ <i>Ricordati di scrivere i nomi delle squadre separati da una virgola (,)</i>")
         await query.edit_message_text(txt, reply_markup=bottone_indietro(), parse_mode='HTML')
 
