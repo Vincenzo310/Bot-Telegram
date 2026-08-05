@@ -1,4 +1,5 @@
 import logging
+import random
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -9,7 +10,7 @@ from telegram.ext import (
     filters,
 )
 
-# Impostazione del logging per debug
+# Impostazione del logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
@@ -17,7 +18,7 @@ logging.basicConfig(
 # Inserisci qui il TOKEN fornito da @BotFather
 TOKEN = "8783678949:AAHqyQyF8zrcg1_xpi30a7ozkz_UGZHV9GM"
 
-# Funzione per inizializzare i dati della sessione se non esistono
+# Inizializzazione dei dati utente
 def init_user_data(context: ContextTypes.DEFAULT_TYPE):
     if "squadre" not in context.user_data:
         context.user_data["squadre"] = []  # Lista nomi squadre
@@ -32,8 +33,7 @@ def init_user_data(context: ContextTypes.DEFAULT_TYPE):
     if "sel_del_ch" not in context.user_data:
         context.user_data["sel_del_ch"] = {}  # {squadra: [canali_da_eliminare]}
 
-# --- TASTIERE E MENU ---
-
+# Tastiera del menu principale
 def main_menu_keyboard():
     keyboard = [
         [InlineKeyboardButton("STATISTICHE", callback_data="statistiche")],
@@ -43,8 +43,7 @@ def main_menu_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# --- COMANDO /START ---
-
+# Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     init_user_data(context)
     context.user_data["attesa_squadre"] = False
@@ -55,8 +54,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=main_menu_keyboard())
 
-# --- GESTORE TEXT MESSAGES (Per aggiungere squadre) ---
-
+# Gestore dei messaggi di testo (per l'inserimento squadre)
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     init_user_data(context)
     if context.user_data.get("attesa_squadre"):
@@ -72,13 +70,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=main_menu_keyboard()
         )
 
-# --- GESTORE CALLBACK BUTTONS ---
-
+# Gestore unico dei pulsanti inline
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     init_user_data(context)
     data = query.data
+
+    # Bottone disattivato (usato solo come etichetta per il nome della squadra)
+    if data == "ignore":
+        return
 
     # --- AGGIUNGI SQUADRE ---
     if data == "aggiungi_squadre":
@@ -131,15 +132,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         report = "📋 *REPORT ASSEGNAZIONE:*\n\n"
-        import random
         for sq in selezionate:
-            # Assegna un canale casuale da 1 a 9
             ch = random.randint(1, 9)
             if ch not in context.user_data["assegnazioni"][sq]:
                 context.user_data["assegnazioni"][sq].append(ch)
             report += f"• *{sq}* -> Canale {ch}\n"
         
-        context.user_data["sel_ass"] = []  # Reset selezione
+        context.user_data["sel_ass"] = []
         kb = [[InlineKeyboardButton("TORNA AL MENU", callback_data="start")]]
         await query.edit_message_text(report, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
 
@@ -181,7 +180,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         keyboard = []
         for i, sq in enumerate(context.user_data["squadre"]):
-            # Mostra solo squadre che hanno almeno un canale
             if context.user_data["assegnazioni"].get(sq):
                 label = f"✅ {sq}" if sq in context.user_data["sel_del_sq"] else sq
                 keyboard.append([InlineKeyboardButton(label, callback_data=f"toggle_delsq_{i}")])
@@ -191,7 +189,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_text("Seleziona le squadre da cui vuoi eliminare i canali:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-    # --- ELIMINA PARZIALE (Passo 2: Selezione Canali) ---
+    # --- ELIMINA PARZIALE (Passo 2: Selezione Canali con 2 bottoni affiancati) ---
     elif data == "conf_delsq" or data.startswith("toggle_delch_"):
         if not context.user_data["sel_del_sq"]:
             await query.answer("Seleziona almeno una squadra!", show_alert=True)
@@ -216,8 +214,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             canali = context.user_data["assegnazioni"].get(sq, [])
             for ch in sorted(canali):
                 is_sel = ch in context.user_data["sel_del_ch"].get(sq, [])
-                label = f"✅ {sq} - Canale {ch}" if is_sel else f"{sq} - Canale {ch}"
-                keyboard.append([InlineKeyboardButton(label, callback_data=f"toggle_delch_{sq_idx}_{ch}")])
+                label_ch = f"✅ Canale {ch}" if is_sel else f"Canale {ch}"
+                
+                # Riga con 2 bottoni separati: [ Nome Squadra ] [ Canale X ]
+                keyboard.append([
+                    InlineKeyboardButton(sq, callback_data="ignore"),
+                    InlineKeyboardButton(label_ch, callback_data=f"toggle_delch_{sq_idx}_{ch}")
+                ])
 
         keyboard.append([InlineKeyboardButton("CONFERMA", callback_data="conferma_elimina_canali")])
         keyboard.append([InlineKeyboardButton("ANNULLA", callback_data="reset_parziale")])
@@ -231,7 +234,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if ch in context.user_data["assegnazioni"][sq]:
                     context.user_data["assegnazioni"][sq].remove(ch)
 
-        # Pulizia dati temporanei
         context.user_data["sel_del_sq"] = []
         context.user_data["sel_del_ch"] = {}
 
@@ -242,8 +244,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "start":
         await start(update, context)
 
-# --- AVVIO BOT ---
-
+# Avvio del Bot
 def main():
     app = Application.builder().token(TOKEN).build()
 
