@@ -99,7 +99,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for sq in squadre:
                 canali = context.user_data["assegnazioni"].get(sq, [])
                 canali_str = ", ".join(map(str, sorted(canali))) if canali else "Nessun canale"
-                kb = [[InlineKeyboardButton("INDIETRO", callback_data="start")]]
+                msg += f"• *{sq}*: Canali [{canali_str}]\n"
+        
+        kb = [[InlineKeyboardButton("INDIETRO", callback_data="start")]]
         await query.edit_message_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
 
     # --- ASSEGNA ---
@@ -182,8 +184,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Mostra solo squadre che hanno almeno un canale
             if context.user_data["assegnazioni"].get(sq):
                 label = f"✅ {sq}" if sq in context.user_data["sel_del_sq"] else sq
-                keyboard.
-                append([InlineKeyboardButton(label, callback_data=f"toggle_delsq_{i}")])
+                keyboard.append([InlineKeyboardButton(label, callback_data=f"toggle_delsq_{i}")])
         
         keyboard.append([InlineKeyboardButton("CONFERMA", callback_data="conf_delsq")])
         keyboard.append([InlineKeyboardButton("ANNULLA", callback_data="reset")])
@@ -253,6 +254,5 @@ def main():
     print("Bot avviato...")
     app.run_polling()
 
-if name == "__main__":
+if __name__ == "__main__":
     main()
-                msg += f"• *{sq}*: Canali [{canali_str}]\n"
