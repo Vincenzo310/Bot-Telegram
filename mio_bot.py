@@ -189,7 +189,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_text("Seleziona le squadre da cui vuoi eliminare i canali:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-    # --- ELIMINA PARZIALE (Passo 2: Selezione Canali con 2 bottoni affiancati) ---
+    # --- ELIMINA PARZIALE (Passo 2: Selezione Canali con bottoni raggruppati per squadra) ---
     elif data == "conf_delsq" or data.startswith("toggle_delch_"):
         if not context.user_data["sel_del_sq"]:
             await query.answer("Seleziona almeno una squadra!", show_alert=True)
@@ -212,15 +212,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for sq in context.user_data["sel_del_sq"]:
             sq_idx = context.user_data["squadre"].index(sq)
             canali = context.user_data["assegnazioni"].get(sq, [])
-            for ch in sorted(canali):
-                is_sel = ch in context.user_data["sel_del_ch"].get(sq, [])
-                label_ch = f"✅ Canale {ch}" if is_sel else f"Canale {ch}"
+            
+            if canali:
+                # Crea la riga partendo dal nome della squadra
+                row = [InlineKeyboardButton(sq, callback_data="ignore")]
                 
-                # Riga con 2 bottoni separati: [ Nome Squadra ] [ Canale X ]
-                keyboard.append([
-                    InlineKeyboardButton(sq, callback_data="ignore"),
-                    InlineKeyboardButton(label_ch, callback_data=f"toggle_delch_{sq_idx}_{ch}")
-                ])
+                # Affianca tutti i bottoni dei canali sulla stessa riga
+                for ch in sorted(canali):
+                    is_sel = ch in context.user_data["sel_del_ch"].get(sq, [])
+                    label_ch = f"✅ Canale {ch}" if is_sel else f"Canale {ch}"
+                    row.append(InlineKeyboardButton(label_ch, callback_data=f"toggle_delch_{sq_idx}_{ch}"))
+                
+                keyboard.append(row)
 
         keyboard.append([InlineKeyboardButton("CONFERMA", callback_data="conferma_elimina_canali")])
         keyboard.append([InlineKeyboardButton("ANNULLA", callback_data="reset_parziale")])
