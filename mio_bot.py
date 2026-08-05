@@ -18,6 +18,19 @@ logging.basicConfig(
 # Inserisci qui il TOKEN fornito da @BotFather
 TOKEN = "8783678949:AAHqyQyF8zrcg1_xpi30a7ozkz_UGZHV9GM"
 
+# ID utente autorizzato
+ADMIN_ID = 1457338119
+
+async def check_auth(update: Update) -> bool:
+    user = update.effective_user
+    if not user or user.id != ADMIN_ID:
+        if update.message:
+            await update.message.reply_text("Non sei autorizzato a usare questo bot.")
+        elif update.callback_query:
+            await update.callback_query.answer("Non sei autorizzato!", show_alert=True)
+        return False
+    return True
+
 # Inizializzazione dei dati utente
 def init_user_data(context: ContextTypes.DEFAULT_TYPE):
     if "squadre" not in context.user_data:
@@ -45,6 +58,8 @@ def main_menu_keyboard():
 
 # Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_auth(update):
+        return
     init_user_data(context)
     context.user_data["attesa_squadre"] = False
     
@@ -56,6 +71,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Gestore dei messaggi di testo (per l'inserimento squadre)
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_auth(update):
+        return
     init_user_data(context)
     if context.user_data.get("attesa_squadre"):
         nuove_squadre = [s.strip() for s in update.message.text.split("\n") if s.strip()]
@@ -72,6 +89,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Gestore unico dei pulsanti inline
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_auth(update):
+        return
     query = update.callback_query
     await query.answer()
     init_user_data(context)
@@ -93,8 +112,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- STATISTICHE ---
     elif data == "statistiche":
         squadre = context.user_data["squadre"]
-        if not squadre:
-            msg = "Nessuna squadra presente."
+        ha_canali = any(context.user_data["assegnazioni"].get(sq, []) for sq in squadre)
+        if not squadre or not ha_canali:
+            msg = "📊 *STATISTICHE SQUADRE E CANALI:*\n\nAncora non sono stati assegnati canali."
         else:
             msg = "📊 *STATISTICHE SQUADRE E CANALI:*\n\n"
             for sq in squadre:
@@ -107,6 +127,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- ASSEGNA ---
     elif data == "assegna" or data.startswith("toggle_ass_"):
+        if not context.user_data["squadre"]:
+            await query.answer("Prima devi aggiungere le squadre!", show_alert=True)
+            return
+
         if data.startswith("toggle_ass_"):
             sq_idx = int(data.split("_")[2])
             sq = context.user_data["squadre"][sq_idx]
@@ -116,9 +140,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["sel_ass"].append(sq)
 
         keyboard = []
-        for i, sq in enumerate(context.user_data["squadre"]):
+        squadre = context.user_data["squadre"]
+        row = []
+        for i, sq in enumerate(squadre):
             label = f"✅ {sq}" if sq in context.user_data["sel_ass"] else sq
-            keyboard.append([InlineKeyboardButton(label, callback_data=f"toggle_ass_{i}")])
+            row.append(InlineKeyboardButton(label, callback_data=f"toggle_ass_{i}"))
+            if len(row) == 3:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
         
         keyboard.append([InlineKeyboardButton("CONFERMA", callback_data="conferma_assegna")])
         keyboard.append([InlineKeyboardButton("ANNULLA", callback_data="start")])
@@ -152,6 +183,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Scegli la modalità di RESET:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data == "reset_tutto":
+        ha_canali = any(context.user_data["assegnazioni"].get(sq, []) for sq in context.user_data["squadre"])
+        if not ha_canali:
+            await query.answer("Non è stato assegnato nessun canale.", show_alert=True)
+            return
+
         keyboard = [
             [InlineKeyboardButton("CONFERMA", callback_data="conferma_reset_tutto")],
             [InlineKeyboardButton("ANNULLA", callback_data="reset")]
@@ -214,13 +250,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             canali = context.user_data["assegnazioni"].get(sq, [])
             
             if canali:
-                # Crea la riga partendo dal nome della squadra
                 row = [InlineKeyboardButton(sq, callback_data="ignore")]
-                
-                # Affianca tutti i bottoni dei canali sulla stessa riga
                 for ch in sorted(canali):
                     is_sel = ch in context.user_data["sel_del_ch"].get(sq, [])
-                    label_ch = f"✅ Canale {ch}" if is_sel else f"Canale {ch}"
+                    label_ch = f"✅ {ch}" if is_sel else f"{ch}"
                     row.append(InlineKeyboardButton(label_ch, callback_data=f"toggle_delch_{sq_idx}_{ch}"))
                 
                 keyboard.append(row)
