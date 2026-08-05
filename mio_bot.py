@@ -92,12 +92,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_auth(update):
         return
     query = update.callback_query
-    await query.answer()
     init_user_data(context)
     data = query.data
 
     # Bottone disattivato (usato solo come etichetta per il nome della squadra)
     if data == "ignore":
+        await query.answer()
         return
 
     # --- AGGIUNGI SQUADRE ---
@@ -203,6 +203,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- ELIMINA PARZIALE (Passo 1: Selezione Squadre) ---
     elif data == "reset_parziale" or data.startswith("toggle_delsq_"):
+        ha_canali = any(context.user_data["assegnazioni"].get(sq, []) for sq in context.user_data["squadre"])
+        if not ha_canali:
+            await query.answer("Non è stato assegnato nessun canale.", show_alert=True)
+            return
+
         if data == "reset_parziale":
             context.user_data["sel_del_sq"] = []
 
@@ -215,10 +220,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["sel_del_sq"].append(sq)
 
         keyboard = []
+        row = []
         for i, sq in enumerate(context.user_data["squadre"]):
             if context.user_data["assegnazioni"].get(sq):
                 label = f"✅ {sq}" if sq in context.user_data["sel_del_sq"] else sq
-                keyboard.append([InlineKeyboardButton(label, callback_data=f"toggle_delsq_{i}")])
+                row.append(InlineKeyboardButton(label, callback_data=f"toggle_delsq_{i}"))
+                if len(row) == 3:
+                    keyboard.append(row)
+                    row = []
+        if row:
+            keyboard.append(row)
         
         keyboard.append([InlineKeyboardButton("CONFERMA", callback_data="conf_delsq")])
         keyboard.append([InlineKeyboardButton("ANNULLA", callback_data="reset")])
