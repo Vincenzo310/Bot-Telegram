@@ -1,178 +1,258 @@
 import logging
-import json
-import random
-import os
-from flask import Flask
-from threading import Thread
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
-# --- SERVER WEB PER KEEP-ALIVE ---
-webapp = Flask('')
+# Impostazione del logging per debug
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
-@webapp.route('/')
-def home():
-    return "✅ IL BOT E' ONLINE!"
+# Inserisci qui il TOKEN fornito da @BotFather
+TOKEN = "8783678949:AAHqyQyF8zrcg1_xpi30a7ozkz_UGZHV9GM"
 
-def run():
-    webapp.run(host='0.0.0.0', port=10000)
+# Funzione per inizializzare i dati della sessione se non esistono
+def init_user_data(context: ContextTypes.DEFAULT_TYPE):
+    if "squadre" not in context.user_data:
+        context.user_data["squadre"] = []  # Lista nomi squadre
+    if "assegnazioni" not in context.user_data:
+        context.user_data["assegnazioni"] = {}  # {squadra: [canali]}
+    if "attesa_squadre" not in context.user_data:
+        context.user_data["attesa_squadre"] = False
+    if "sel_ass" not in context.user_data:
+        context.user_data["sel_ass"] = []  # Squadre selezionate in ASSEGNA
+    if "sel_del_sq" not in context.user_data:
+        context.user_data["sel_del_sq"] = []  # Squadre selezionate in RESET PARZIALE
+    if "sel_del_ch" not in context.user_data:
+        context.user_data["sel_del_ch"] = {}  # {squadra: [canali_da_eliminare]}
 
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
+# --- TASTIERE E MENU ---
 
-# --- CONFIGURAZIONE BOT ---
-TOKEN = "8469087738:AAGjieDhhx_NU8eItWoGWMET8H35S7gLe6g"
-IL_TUO_ID_TELEGRAM = 8361466889
-DB_FILE = "db_squadre.json"
-RANGE_CANALI = list(range(1, 10))
-
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
-
-# --- FUNZIONI DATABASE ---
-def carica_dati():
-    if not os.path.exists(DB_FILE): return {}
-    with open(DB_FILE, 'r', encoding='utf-8') as f:
-        try: return json.load(f)
-        except: return {}
-
-def salva_dati(dati):
-    with open(DB_FILE, 'w', encoding='utf-8') as f:
-        json.dump(dati, f, indent=4, ensure_ascii=False)
-
-def ottieni_canale_random(squadra, dati):
-    if squadra not in dati:
-        dati[squadra] = {"disponibili": list(RANGE_CANALI), "usati": []}
-    if not dati[squadra]["disponibili"]:
-        dati[squadra]["disponibili"], dati[squadra]["usati"] = list(RANGE_CANALI), []
-    c = random.choice(dati[squadra]["disponibili"])
-    dati[squadra]["disponibili"].remove(c)
-    dati[squadra]["usati"].append(c)
-    return c
-
-def assegna_canale_manuale(squadra, canale, dati):
-    if squadra not in dati:
-        dati[squadra] = {"disponibili": list(RANGE_CANALI), "usati": []}
-    if canale not in dati[squadra]["usati"]:
-        dati[squadra]["usati"].append(canale)
-        if canale in dati[squadra]["disponibili"]:
-            dati[squadra]["disponibili"].remove(canale)
-    return canale
-
-# --- TASTIERE ---
-def menu_admin():
+def main_menu_keyboard():
     keyboard = [
-        [InlineKeyboardButton("📊 CANALI USATI", callback_data='stato')],
-        [InlineKeyboardButton("📉 CANALI MANCANTI", callback_data='mancanti')],
-        [InlineKeyboardButton("🎲 ASSEGNA", callback_data='help_assegna')],
-        [InlineKeyboardButton("🗑️ RESET", callback_data='menu_reset')]
+        [InlineKeyboardButton("STATISTICHE", callback_data="statistiche")],
+        [InlineKeyboardButton("RESET", callback_data="reset")],
+        [InlineKeyboardButton("ASSEGNA", callback_data="assegna")],
+        [InlineKeyboardButton("AGGIUNGI SQUADRE", callback_data="aggiungi_squadre")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
-def bottone_indietro():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ INDIETRO", callback_data='back')]])
+# --- COMANDO /START ---
 
-# --- HANDLERS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != IL_TUO_ID_TELEGRAM: return
-    await update.message.reply_text(
-        "<b>👮‍♂️| PANNELLO ADMIN</b>\n\nScegli una tra le seguenti opzioni ⤵️",
-        reply_markup=menu_admin(),
-        parse_mode='HTML'
-    )
+    init_user_data(context)
+    context.user_data["attesa_squadre"] = False
+    
+    text = "Benvenuto! Scegli un'opzione dal menu sottostante:"
+    if update.message:
+        await update.message.reply_text(text, reply_markup=main_menu_keyboard())
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=main_menu_keyboard())
 
-async def gestore_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- GESTORE TEXT MESSAGES (Per aggiungere squadre) ---
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    init_user_data(context)
+    if context.user_data.get("attesa_squadre"):
+        nuove_squadre = [s.strip() for s in update.message.text.split("\n") if s.strip()]
+        for sq in nuove_squadre:
+            if sq not in context.user_data["squadre"]:
+                context.user_data["squadre"].append(sq)
+                context.user_data["assegnazioni"][sq] = []
+        
+        context.user_data["attesa_squadre"] = False
+        await update.message.reply_text(
+            f"✅ Aggiunte {len(nuove_squadre)} squadre con successo!",
+            reply_markup=main_menu_keyboard()
+        )
+
+# --- GESTORE CALLBACK BUTTONS ---
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if query.from_user.id != IL_TUO_ID_TELEGRAM: return
     await query.answer()
+    init_user_data(context)
     data = query.data
 
-    if data == 'back':
-        await query.edit_message_text("<b>👮‍♂️| PANNELLO ADMIN</b>\n\nScegli una tra le seguenti opzioni ⤵️", reply_markup=menu_admin(), parse_mode='HTML')
+    # --- AGGIUNGI SQUADRE ---
+    if data == "aggiungi_squadre":
+        context.user_data["attesa_squadre"] = True
+        kb = [[InlineKeyboardButton("INDIETRO", callback_data="start")]]
+        await query.edit_message_text(
+            "Invia un messaggio con i nomi delle squadre che vuoi aggiungere (una per riga):",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
 
-    elif data == 'stato':
-        dati = carica_dati()
-        txt = "🟢 <b>RIEPILOGO CANALI USATI:</b>\n\n"
-        if not dati: txt += "<i><b>Non hai assegnato nessun canale al momento.</b>\n\n<i>Torna indietro per assegnarne uno!</i>"
+    # --- STATISTICHE ---
+    elif data == "statistiche":
+        squadre = context.user_data["squadre"]
+        if not squadre:
+            msg = "Nessuna squadra presente."
         else:
-            for s, info in dati.items():
-                txt += f"• <b>{s}</b>: {sorted(info['usati'])}\n"
-        await query.edit_message_text(txt, reply_markup=bottone_indietro(), parse_mode='HTML')
+            msg = "📊 *STATISTICHE SQUADRE E CANALI:*\n\n"
+            for sq in squadre:
+                canali = context.user_data["assegnazioni"].get(sq, [])
+                canali_str = ", ".join(map(str, sorted(canali))) if canali else "Nessun canale"
+                kb = [[InlineKeyboardButton("INDIETRO", callback_data="start")]]
+        await query.edit_message_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
 
-    elif data == 'mancanti':
-        dati = carica_dati()
-        txt = "🔴 <b>CANALI ANCORA DISPONIBILI:</b>\n\n"
-        if not dati: txt += "<i><b>Non hai ancora assegnato nessun canale.</i></b>\n\n<i>Torna indietro per assegnarne uno!</i>"
-        else:
-            for s, info in dati.items():
-                # Calcoliamo i canali mancanti (quelli nel range che NON sono negli usati)
-                mancanti = [c for c in RANGE_CANALI if c not in info['usati']]
-                txt += f"• <b>{s}</b>: {mancanti if mancanti else '⚠️ FINITI'}\n"
-        await query.edit_message_text(txt, reply_markup=bottone_indietro(), parse_mode='HTML')
+    # --- ASSEGNA ---
+    elif data == "assegna" or data.startswith("toggle_ass_"):
+        if data.startswith("toggle_ass_"):
+            sq_idx = int(data.split("_")[2])
+            sq = context.user_data["squadre"][sq_idx]
+            if sq in context.user_data["sel_ass"]:
+                context.user_data["sel_ass"].remove(sq)
+            else:
+                context.user_data["sel_ass"].append(sq)
 
-    elif data == 'menu_reset':
-        kb = [[InlineKeyboardButton("💣 RESETTA TUTTO", callback_data='reset_all_do')],
-              [InlineKeyboardButton("⚽ RESETTA SINGOLO CANALE", callback_data='help_reset_single')],
-              [InlineKeyboardButton("⬅️ INDIETRO", callback_data='back')]]
-        await query.edit_message_text("❓ <b>COSA VUOI RESETTARE?</b>", reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
+        keyboard = []
+        for i, sq in enumerate(context.user_data["squadre"]):
+            label = f"✅ {sq}" if sq in context.user_data["sel_ass"] else sq
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"toggle_ass_{i}")])
+        
+        keyboard.append([InlineKeyboardButton("CONFERMA", callback_data="conferma_assegna")])
+        keyboard.append([InlineKeyboardButton("ANNULLA", callback_data="start")])
 
-    elif data == 'help_assegna':
-        txt = ("🎲 <b>MODALITÀ ASSEGNAZIONE ⤵️</b>\n\n"
-            "1️⃣ <b>CASUALE:</b> <code>Juventus, Milan</code>\n"
-            "2️⃣ <b>MANUALE:</b> <code>Inter:5</code>\n\n"
-            "⚠️ <i>Ricordati di scrivere i nomi delle squadre separati da una virgola (,)</i>")
-        await query.edit_message_text(txt, reply_markup=bottone_indietro(), parse_mode='HTML')
+        await query.edit_message_text("Seleziona le squadre a cui assegnare dei canali:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-    elif data == 'help_reset_single':
-        await query.edit_message_text("🗑 <b>RESET SINGOLO</b>\n\nDIGITA: <code>cancella Napoli, Atalanta</code>", reply_markup=bottone_indietro(), parse_mode='HTML')
+    elif data == "conferma_assegna":
+        selezionate = context.user_data["sel_ass"]
+        if not selezionate:
+            await query.answer("Seleziona almeno una squadra!", show_alert=True)
+            return
+        
+        report = "📋 *REPORT ASSEGNAZIONE:*\n\n"
+        import random
+        for sq in selezionate:
+            # Assegna un canale casuale da 1 a 9
+            ch = random.randint(1, 9)
+            if ch not in context.user_data["assegnazioni"][sq]:
+                context.user_data["assegnazioni"][sq].append(ch)
+            report += f"• *{sq}* -> Canale {ch}\n"
+        
+        context.user_data["sel_ass"] = []  # Reset selezione
+        kb = [[InlineKeyboardButton("TORNA AL MENU", callback_data="start")]]
+        await query.edit_message_text(report, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
 
-    elif data == 'reset_all_do':
-        if os.path.exists(DB_FILE): os.remove(DB_FILE)
-        await query.edit_message_text("✅ <b>Canali cancellati correttamente</b>", reply_markup=bottone_indietro(), parse_mode='HTML')
+    # --- RESET ---
+    elif data == "reset":
+        keyboard = [
+            [InlineKeyboardButton("TUTTO", callback_data="reset_tutto")],
+            [InlineKeyboardButton("ELIMINA PARZIALE", callback_data="reset_parziale")],
+            [InlineKeyboardButton("INDIETRO", callback_data="start")]
+        ]
+        await query.edit_message_text("Scegli la modalità di RESET:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def gestore_testo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != IL_TUO_ID_TELEGRAM: return
-    testo = update.message.text.strip()
+    elif data == "reset_tutto":
+        keyboard = [
+            [InlineKeyboardButton("CONFERMA", callback_data="conferma_reset_tutto")],
+            [InlineKeyboardButton("ANNULLA", callback_data="reset")]
+        ]
+        await query.edit_message_text("Sei sicuro di voler eliminare TUTTI i canali assegnati?", reply_markup=InlineKeyboardMarkup(keyboard))
 
-    # --- CANCELLAZIONE SINGOLA ---
-    if testo.lower().startswith("cancella "):
-        nomi = [s.strip() for s in testo.replace("cancella ", "").split(',') if s.strip()]
-        dati = carica_dati()
-        rimossi = []
-        for n in nomi:
-            squadra_trovata = next((k for k in dati.keys() if k.lower() == n.lower()), None)
-            if squadra_trovata:
-                del dati[squadra_trovata]
-                rimossi.append(squadra_trovata)
-        salva_dati(dati)
-        msg = f"✅ <b>RIMOSSI I CANALI A:</b> {', '.join(rimossi)}" if rimossi else "❌ Nessuna squadra trovata."
-        await update.message.reply_text(msg, parse_mode='HTML')
-        await update.message.reply_text("<b>👮‍♂️| PANNELLO ADMIN</b>\n\nScegli una tra le seguenti opzioni ⤵️", reply_markup=menu_admin(), parse_mode='HTML')
-        return
+    elif data == "conferma_reset_tutto":
+        for sq in context.user_data["assegnazioni"]:
+            context.user_data["assegnazioni"][sq] = []
+        
+        kb = [[InlineKeyboardButton("TORNA AL MENU", callback_data="start")]]
+        await query.edit_message_text("🗑️ Tutti i canali assegnati sono stati eliminati.", reply_markup=InlineKeyboardMarkup(kb))
 
-    # --- ASSEGNAZIONE ---
-    elementi = [e.strip() for e in testo.split(',') if e.strip()]
-    dati, ris = carica_dati(), " <b>✔️ CANALI ASSEGNATI: ⤵️</b>\n\n"
+    # --- ELIMINA PARZIALE (Passo 1: Selezione Squadre) ---
+    elif data == "reset_parziale" or data.startswith("toggle_delsq_"):
+        if data == "reset_parziale":
+            context.user_data["sel_del_sq"] = []
 
-    for item in elementi:
-        if ":" in item:
-            try:
-                squadra, canale = item.split(":")
-                assegna_canale_manuale(squadra.strip(), int(canale.strip()), dati)
-                ris += f"✅ <b>{squadra.strip()}</b>: Canale {canale.strip()} (Manuale)\n"
-            except: ris += f"❌ Errore formato: RIPROVA! `{item}`\n"
-        else:
-            c = ottieni_canale_random(item, dati)
-            ris += f"⚽ <b>{item}</b>: Canale {c}\n"
+        if data.startswith("toggle_delsq_"):
+            sq_idx = int(data.split("_")[2])
+            sq = context.user_data["squadre"][sq_idx]
+            if sq in context.user_data["sel_del_sq"]:
+                context.user_data["sel_del_sq"].remove(sq)
+            else:
+                context.user_data["sel_del_sq"].append(sq)
 
-    salva_dati(dati)
-    await update.message.reply_text(ris, parse_mode='HTML')
-    await update.message.reply_text("<b>👮‍♂️| PANNELLO ADMIN</b>\n\nScegli una tra le seguenti opzioni ⤵️", reply_markup=menu_admin(), parse_mode='HTML')
+        keyboard = []
+        for i, sq in enumerate(context.user_data["squadre"]):
+            # Mostra solo squadre che hanno almeno un canale
+            if context.user_data["assegnazioni"].get(sq):
+                label = f"✅ {sq}" if sq in context.user_data["sel_del_sq"] else sq
+                keyboard.
+                append([InlineKeyboardButton(label, callback_data=f"toggle_delsq_{i}")])
+        
+        keyboard.append([InlineKeyboardButton("CONFERMA", callback_data="conf_delsq")])
+        keyboard.append([InlineKeyboardButton("ANNULLA", callback_data="reset")])
 
-if __name__ == '__main__':
-    keep_alive()
-    bot_app = ApplicationBuilder().token(TOKEN).build()
-    bot_app.add_handler(CommandHandler('start', start))
-    bot_app.add_handler(CallbackQueryHandler(gestore_callback))
-    bot_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), gestore_testo))
-    bot_app.run_polling()
+        await query.edit_message_text("Seleziona le squadre da cui vuoi eliminare i canali:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    # --- ELIMINA PARZIALE (Passo 2: Selezione Canali) ---
+    elif data == "conf_delsq" or data.startswith("toggle_delch_"):
+        if not context.user_data["sel_del_sq"]:
+            await query.answer("Seleziona almeno una squadra!", show_alert=True)
+            return
+
+        if data.startswith("toggle_delch_"):
+            parts = data.split("_")
+            sq = context.user_data["squadre"][int(parts[2])]
+            ch = int(parts[3])
+
+            if sq not in context.user_data["sel_del_ch"]:
+                context.user_data["sel_del_ch"][sq] = []
+
+            if ch in context.user_data["sel_del_ch"][sq]:
+                context.user_data["sel_del_ch"][sq].remove(ch)
+            else:
+                context.user_data["sel_del_ch"][sq].append(ch)
+
+        keyboard = []
+        for sq in context.user_data["sel_del_sq"]:
+            sq_idx = context.user_data["squadre"].index(sq)
+            canali = context.user_data["assegnazioni"].get(sq, [])
+            for ch in sorted(canali):
+                is_sel = ch in context.user_data["sel_del_ch"].get(sq, [])
+                label = f"✅ {sq} - Canale {ch}" if is_sel else f"{sq} - Canale {ch}"
+                keyboard.append([InlineKeyboardButton(label, callback_data=f"toggle_delch_{sq_idx}_{ch}")])
+
+        keyboard.append([InlineKeyboardButton("CONFERMA", callback_data="conferma_elimina_canali")])
+        keyboard.append([InlineKeyboardButton("ANNULLA", callback_data="reset_parziale")])
+
+        await query.edit_message_text("Seleziona i canali specifici da eliminare:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif data == "conferma_elimina_canali":
+        del_dict = context.user_data["sel_del_ch"]
+        for sq, canali in del_dict.items():
+            for ch in canali:
+                if ch in context.user_data["assegnazioni"][sq]:
+                    context.user_data["assegnazioni"][sq].remove(ch)
+
+        # Pulizia dati temporanei
+        context.user_data["sel_del_sq"] = []
+        context.user_data["sel_del_ch"] = {}
+
+        kb = [[InlineKeyboardButton("TORNA AL MENU", callback_data="start")]]
+        await query.edit_message_text("🗑️ Canali selezionati eliminati con successo!", reply_markup=InlineKeyboardMarkup(kb))
+
+    # --- INDIETRO / START ---
+    elif data == "start":
+        await start(update, context)
+
+# --- AVVIO BOT ---
+
+def main():
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+    print("Bot avviato...")
+    app.run_polling()
+
+if name == "__main__":
+    main()
+                msg += f"• *{sq}*: Canali [{canali_str}]\n"
