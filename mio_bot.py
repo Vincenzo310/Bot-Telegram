@@ -63,11 +63,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     init_user_data(context)
     context.user_data["attesa_squadre"] = False
     
-    text = "Benvenuto! Scegli un'opzione dal menu sottostante:"
+    text = '<tg-emoji emoji-id="5472055112702629499">👋</tg-emoji> Benvenuto! Scegli un\'opzione dal menu sottostante:'
     if update.message:
-        await update.message.reply_text(text, reply_markup=main_menu_keyboard())
+        await update.message.reply_text(text, parse_mode="HTML", reply_markup=main_menu_keyboard())
     elif update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=main_menu_keyboard())
+        await update.callback_query.edit_message_text(text, parse_mode="HTML", reply_markup=main_menu_keyboard())
 
 # Gestore dei messaggi di testo (per l'inserimento squadre)
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
